@@ -329,7 +329,7 @@
 
 <script>
 // ========== STATE ==========
-var SYNC_THRESHOLD = 3;
+var SYNC_THRESHOLD = 1;  // seconds — seek if drift exceeds this
 var PRESENCE_INTERVAL = 5000;
 var PRESENCE_TIMEOUT = 14000;
 var nickname = "";
@@ -433,10 +433,10 @@ function flashError(inputId) {
 }
 
 // Suppress outbound state-change publishes for `ms` milliseconds.
-// Uses a timestamp so multiple rapid calls extend the window cleanly — no stuck flag.
-// Variable windows: play=2000, pause=1500, seek=3000, late-join=5000
+// Simple overwrite — do NOT use Math.max here. Rapid spam must not compound
+// the window; each sync gets its own fresh window so the next event can fire.
 function suppress(ms) {
-  suppressUntil = Math.max(suppressUntil, Date.now() + ms);
+  suppressUntil = Date.now() + ms;
 }
 function suppressed() {
   return Date.now() < suppressUntil;
@@ -871,17 +871,22 @@ function applySync(action, time) {
   log("Sync:", action, "t:", time.toFixed(1), "drift:", drift.toFixed(1));
 
   if (action === "play") {
-    suppress(2000); // covers buffering before PLAYING re-fires
-    if (drift > SYNC_THRESHOLD) player.seekTo(time, true);
+    if (drift > SYNC_THRESHOLD) {
+      suppress(2500); // seek triggers buffering — need longer window for PLAYING to re-fire
+      player.seekTo(time, true);
+    } else {
+      suppress(400);  // no seek, no buffering — just block the immediate echo
+    }
     player.playVideo();
   } else if (action === "pause") {
-    suppress(1500);
+    // Always snap to exact timestamp on pause — no threshold.
+    // drift of even 0.5s is visible as a jump when both users compare their screens.
+    suppress(400);
     player.pauseVideo();
-    if (drift > SYNC_THRESHOLD) player.seekTo(time, true);
+    player.seekTo(time, true);
   } else if (action === "seek") {
-    // Only re-seek if drift is meaningful — prevents heartbeat micro-seeks
     if (drift > SYNC_THRESHOLD) {
-      suppress(3000); // seek→buffer→PLAYING can take 1-3s; must outlast it
+      suppress(2500);
       player.seekTo(time, true);
     }
   }
