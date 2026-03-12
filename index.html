@@ -339,14 +339,14 @@ var mqttClient = null;
 var currentVideoId = null;
 var player = null;
 var playerReady = false;
-var isSyncing = false;
+var suppressUntil = 0;       // timestamp — suppress outbound state publishes until this moment
 var presenceTimer = null;
+var resyncTimer = null;      // periodic drift-correction heartbeat
 var seekUpdateTimer = null;
 var knownPeers = {};
 var isSeeking = false;
 var lastVolume = 100;
 var pendingStateSync = null; // { videoId, time, playing, receivedAt } for late-joiner drift correction
-var syncTimeout = null;
 
 var BROKERS = [
   "wss://broker.hivemq.com:8884/mqtt",
@@ -430,11 +430,14 @@ function flashError(inputId) {
   setTimeout(function() { el.classList.remove("error"); }, 2000);
 }
 
-// Safe isSyncing setter — auto-clears after 900ms so it can never get permanently stuck
-function setSyncing() {
-  if (syncTimeout) clearTimeout(syncTimeout);
-  isSyncing = true;
-  syncTimeout = setTimeout(function() { isSyncing = false; syncTimeout = null; }, 900);
+// Suppress outbound state-change publishes for `ms` milliseconds.
+// Uses a timestamp so multiple rapid calls extend the window cleanly — no stuck flag.
+// Variable windows: play=2000, pause=1500, seek=3000, late-join=5000
+function suppress(ms) {
+  suppressUntil = Math.max(suppressUntil, Date.now() + ms);
+}
+function suppressed() {
+  return Date.now() < suppressUntil;
 }
 
 function leaveRoom() {
@@ -446,7 +449,8 @@ function leaveRoom() {
   // Stop timers
   if (presenceTimer) { clearInterval(presenceTimer); presenceTimer = null; }
   if (seekUpdateTimer) { clearInterval(seekUpdateTimer); seekUpdateTimer = null; }
-  if (syncTimeout) { clearTimeout(syncTimeout); syncTimeout = null; }
+  if (resyncTimer) { clearInterval(resyncTimer); resyncTimer = null; }
+  suppressUntil = 0;
 
   // Disconnect MQTT
   if (mqttClient) { try { mqttClient.end(true); } catch(e) {} mqttClient = null; }
@@ -457,7 +461,7 @@ function leaveRoom() {
   currentVideoId = null;
   pendingStateSync = null;
   knownPeers = {};
-  isSyncing = false;
+  suppressUntil = 0;
   roomCode = "";
 
   // Reset player UI
@@ -761,14 +765,16 @@ function initPlayer(videoId, startTime, autoplay) {
           playerReady = true;
           log("Player ready");
           startSeekUpdater();
+          startResyncHeartbeat();
 
-          // Late-joiner drift correction: the time in state-response is already stale
-          // by however long the player took to load — compensate here
+          // Late-joiner drift correction: the time in state-response is stale
+          // by however long the player took to load — compensate here.
+          // suppress(5000) covers: seek + buffer + PLAYING firing after buffer.
           if (pendingStateSync) {
             var elapsed = (Date.now() - pendingStateSync.receivedAt) / 1000;
             var targetTime = pendingStateSync.time + (pendingStateSync.playing ? elapsed : 0);
             log("Late-join seek to:", targetTime.toFixed(1), "(elapsed:", elapsed.toFixed(1), "s)");
-            setSyncing();
+            suppress(5000);
             player.seekTo(targetTime, true);
             if (pendingStateSync.playing) {
               player.playVideo();
@@ -787,7 +793,8 @@ function initPlayer(videoId, startTime, autoplay) {
         },
         onStateChange: function(e) {
           updatePlayPauseBtn();
-          if (isSyncing) return;
+          // suppressed() uses a timestamp so it never gets permanently stuck
+          if (suppressed()) return;
           if (e.data === YT.PlayerState.PLAYING) {
             publish("sync", { action: "play", time: player.getCurrentTime() });
           } else if (e.data === YT.PlayerState.PAUSED) {
@@ -801,7 +808,6 @@ function initPlayer(videoId, startTime, autoplay) {
             document.getElementById("customControls").classList.remove("visible");
             document.getElementById("placeholder").style.display = "";
             playerReady = false;
-            // Keep player object alive so we can reuse it, but mark as ended
             currentVideoId = null;
           }
         },
@@ -818,7 +824,7 @@ function initPlayer(videoId, startTime, autoplay) {
 
 function applySync(action, time) {
   if (!player || !playerReady) return;
-  setSyncing();
+
   document.getElementById("syncBadge").classList.add("active");
   setTimeout(function() { document.getElementById("syncBadge").classList.remove("active"); }, 600);
 
@@ -826,14 +832,19 @@ function applySync(action, time) {
   log("Sync:", action, "t:", time.toFixed(1), "drift:", drift.toFixed(1));
 
   if (action === "play") {
+    suppress(2000); // covers buffering before PLAYING re-fires
     if (drift > SYNC_THRESHOLD) player.seekTo(time, true);
     player.playVideo();
   } else if (action === "pause") {
+    suppress(1500);
     player.pauseVideo();
     if (drift > SYNC_THRESHOLD) player.seekTo(time, true);
   } else if (action === "seek") {
-    player.seekTo(time, true);
-    log("Seek sync to:", time.toFixed(1));
+    // Only re-seek if drift is meaningful — prevents heartbeat micro-seeks
+    if (drift > SYNC_THRESHOLD) {
+      suppress(3000); // seek→buffer→PLAYING can take 1-3s; must outlast it
+      player.seekTo(time, true);
+    }
   }
 }
 
@@ -866,7 +877,7 @@ function updatePlayPauseBtn() {
   } catch(e) {}
 }
 
-// Play/Pause
+// Play/Pause — clicking this triggers onStateChange which publishes. No double-publish.
 document.getElementById("ctrlPlayPause").addEventListener("click", function() {
   if (!player || !playerReady) return;
   try {
@@ -896,6 +907,7 @@ seekBar.addEventListener("change", function() {
   try {
     var duration = player.getDuration();
     var t = (parseFloat(this.value) / 100) * duration;
+    suppress(2000); // prevent the PAUSED+PLAYING sequence from scrub flooding network
     player.seekTo(t, true);
     publish("sync", { action: "seek", time: t });
   } catch(e) {}
@@ -946,6 +958,23 @@ function startSeekUpdater() {
       }
     } catch(e) {}
   }, 500);
+}
+
+// Periodic drift-correction heartbeat — every 30s while playing,
+// publish current time as a "seek" so peers can self-correct silently.
+// applySync("seek") only re-seeks if drift > SYNC_THRESHOLD, so it's a no-op
+// for peers that are already tight.
+function startResyncHeartbeat() {
+  if (resyncTimer) clearInterval(resyncTimer);
+  resyncTimer = setInterval(function() {
+    if (!player || !playerReady) return;
+    try {
+      if (player.getPlayerState() === YT.PlayerState.PLAYING) {
+        publish("sync", { action: "seek", time: player.getCurrentTime() });
+        log("Heartbeat resync at:", player.getCurrentTime().toFixed(1));
+      }
+    } catch(e) {}
+  }, 30000);
 }
 
 // ========== CHAT ==========
