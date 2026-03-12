@@ -634,8 +634,8 @@ function handleMessage(t, data) {
           addSystemMessage("⏸ Syncing " + nickname + " — resuming shortly...");
         }
 
-        // Always load without autoplay — onReady handles the actual play
-        initPlayer(data.videoId, data.time, false);
+        // Iframe always activates (autoplay:1); onReady seeks/pauses as needed
+        initPlayer(data.videoId, data.time);
       }
       break;
   }
@@ -760,8 +760,8 @@ function loadYTAPI() {
   });
 }
 
-function initPlayer(videoId, startTime, autoplay) {
-  log("initPlayer:", videoId, "startAt:", startTime, "autoplay:", autoplay);
+function initPlayer(videoId, startTime) {
+  log("initPlayer:", videoId, "startAt:", startTime);
   loadYTAPI().then(function() {
     playerReady = false;
     var host = document.getElementById("ytPlayerHost");
@@ -778,7 +778,7 @@ function initPlayer(videoId, startTime, autoplay) {
       height: "100%",
       videoId: videoId,
       playerVars: {
-        autoplay: autoplay ? 1 : 0,
+        autoplay: 1,           // always activate the iframe UI; onReady pauses if not wanted
         controls: 1,
         playsinline: 1,
         modestbranding: 1,
@@ -889,7 +889,7 @@ function applySync(action, time) {
 
 function loadVideoById(videoId) {
   currentVideoId = videoId;
-  initPlayer(videoId, 0, false);
+  initPlayer(videoId, 0);
 }
 
 document.getElementById("btnLoad").addEventListener("click", loadVideo);
@@ -904,7 +904,7 @@ function loadVideo() {
   lastSyncTs = 0;      // new video — stale filter reset
   awaitingResume = false;
   document.getElementById("videoUrlInput").value = "";
-  initPlayer(videoId, 0, false);
+  initPlayer(videoId, 0);
   // Publish with retain so late joiners also get it
   publish("video", { videoId: videoId }, true);
 }
