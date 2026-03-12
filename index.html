@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>WatchTogether</title>
+<title>CouchView</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -226,6 +226,14 @@
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
   .pulsing { animation: pulse 1.5s ease-in-out infinite; }
 
+  .btn-leave {
+    padding: 6px 14px; border-radius: 8px; border: 1px solid #3d3656;
+    background: transparent; color: #8a819e; font-size: 12px;
+    font-weight: 600; cursor: pointer; transition: all 0.2s; font-family: inherit;
+    letter-spacing: 0.3px;
+  }
+  .btn-leave:hover { border-color: #ff4d6a; color: #ff4d6a; background: rgba(255,77,106,0.07); }
+
   @media (max-width: 700px) {
     .chat-col { display: none; }
     .volume-group { display: none; }
@@ -239,7 +247,7 @@
     <div style="margin-bottom: 40px;">
       <div class="logo-row">
         <div class="logo-icon">▶</div>
-        <span class="logo-text">WatchTogether</span>
+        <span class="logo-text">CouchView</span>
       </div>
       <p class="lobby-sub">Sync YouTube videos with friends — no installs, no sign-ups</p>
     </div>
@@ -262,7 +270,7 @@
   <div class="room-header">
     <div class="room-header-left">
       <div class="room-logo-sm">▶</div>
-      <span class="room-logo-text">WatchTogether</span>
+      <span class="room-logo-text">CouchView</span>
     </div>
     <div class="room-header-right">
       <span class="sync-badge" id="syncBadge">⟳ syncing</span>
@@ -271,6 +279,7 @@
         <span class="conn-label pulsing" id="connLabel">connecting...</span>
       </div>
       <div class="room-code" id="roomCodeDisplay" title="Click to copy room code"></div>
+      <button class="btn-leave" id="btnLeave" title="Leave room">Leave</button>
     </div>
   </div>
 
@@ -336,6 +345,8 @@ var seekUpdateTimer = null;
 var knownPeers = {};
 var isSeeking = false;
 var lastVolume = 100;
+var pendingStateSync = null; // { videoId, time, playing, receivedAt } for late-joiner drift correction
+var syncTimeout = null;
 
 var BROKERS = [
   "wss://broker.hivemq.com:8884/mqtt",
@@ -344,7 +355,7 @@ var BROKERS = [
 
 function log() {
   var args = Array.prototype.slice.call(arguments);
-  args.unshift("[WT]");
+  args.unshift("[CV]");
   console.log.apply(console, args);
 }
 
@@ -419,9 +430,58 @@ function flashError(inputId) {
   setTimeout(function() { el.classList.remove("error"); }, 2000);
 }
 
+// Safe isSyncing setter — auto-clears after 900ms so it can never get permanently stuck
+function setSyncing() {
+  if (syncTimeout) clearTimeout(syncTimeout);
+  isSyncing = true;
+  syncTimeout = setTimeout(function() { isSyncing = false; syncTimeout = null; }, 900);
+}
+
+function leaveRoom() {
+  // Announce departure before disconnecting
+  if (mqttClient && mqttClient.connected) {
+    publish("presence", { nick: nickname, event: "leave" });
+  }
+
+  // Stop timers
+  if (presenceTimer) { clearInterval(presenceTimer); presenceTimer = null; }
+  if (seekUpdateTimer) { clearInterval(seekUpdateTimer); seekUpdateTimer = null; }
+  if (syncTimeout) { clearTimeout(syncTimeout); syncTimeout = null; }
+
+  // Disconnect MQTT
+  if (mqttClient) { try { mqttClient.end(true); } catch(e) {} mqttClient = null; }
+
+  // Reset player state
+  playerReady = false;
+  player = null;
+  currentVideoId = null;
+  pendingStateSync = null;
+  knownPeers = {};
+  isSyncing = false;
+  roomCode = "";
+
+  // Reset player UI
+  var host = document.getElementById("ytPlayerHost");
+  if (host) host.innerHTML = "";
+  document.getElementById("playerWrapper").style.display = "none";
+  document.getElementById("customControls").classList.remove("visible");
+  document.getElementById("placeholder").style.display = "";
+  document.getElementById("videoUrlInput").value = "";
+
+  // Reset chat
+  document.getElementById("chatMessages").innerHTML = '<div class="chat-empty" id="chatEmpty">No messages yet...</div>';
+
+  // Back to lobby
+  document.getElementById("room").style.display = "none";
+  document.getElementById("lobby").style.display = "flex";
+  document.getElementById("statusMsg").textContent = "";
+  setConnected(false, "connecting...");
+  log("Left room");
+}
+
 // ========== MQTT ==========
 function topicPath(sub) {
-  return "watchtogether/" + roomCode + "/" + sub;
+  return "couchview/" + roomCode + "/" + sub;
 }
 
 function publish(sub, data, retain) {
@@ -441,7 +501,7 @@ function connectToBroker(brokerIndex) {
   log("Connecting to broker:", url);
   setStatus("Connecting to server (" + (brokerIndex + 1) + "/" + BROKERS.length + ")...");
 
-  var clientId = "wt_" + myId + "_" + Math.random().toString(36).slice(2, 6);
+  var clientId = "cv_" + myId + "_" + Math.random().toString(36).slice(2, 6);
 
   mqttClient = mqtt.connect(url, {
     clientId: clientId,
@@ -507,7 +567,7 @@ function connectToBroker(brokerIndex) {
 }
 
 function handleMessage(t, data) {
-  var sub = t.replace("watchtogether/" + roomCode + "/", "");
+  var sub = t.replace("couchview/" + roomCode + "/", "");
 
   switch (sub) {
     case "sync":
@@ -539,9 +599,10 @@ function handleMessage(t, data) {
       }
       break;
     case "state-response":
-      // Late joiner receives current video state
+      // Late joiner receives current video state — stamp arrival time for drift correction
       if (!currentVideoId && data.videoId) {
-        log("Got state from", data.nick, "- video:", data.videoId, "time:", data.time);
+        log("Got state from", data.nick, "- video:", data.videoId, "time:", data.time, "playing:", data.playing);
+        pendingStateSync = { videoId: data.videoId, time: data.time, playing: data.playing, receivedAt: Date.now() };
         currentVideoId = data.videoId;
         initPlayer(data.videoId, data.time, data.playing);
       }
@@ -649,6 +710,10 @@ document.getElementById("roomCodeDisplay").addEventListener("click", function() 
   setTimeout(function() { self.textContent = roomCode; }, 1200);
 });
 
+document.getElementById("btnLeave").addEventListener("click", function() {
+  if (confirm("Leave the room?")) leaveRoom();
+});
+
 // ========== YOUTUBE ==========
 function loadYTAPI() {
   return new Promise(function(resolve) {
@@ -696,7 +761,24 @@ function initPlayer(videoId, startTime, autoplay) {
           playerReady = true;
           log("Player ready");
           startSeekUpdater();
-          // Set volume slider to match player
+
+          // Late-joiner drift correction: the time in state-response is already stale
+          // by however long the player took to load — compensate here
+          if (pendingStateSync) {
+            var elapsed = (Date.now() - pendingStateSync.receivedAt) / 1000;
+            var targetTime = pendingStateSync.time + (pendingStateSync.playing ? elapsed : 0);
+            log("Late-join seek to:", targetTime.toFixed(1), "(elapsed:", elapsed.toFixed(1), "s)");
+            setSyncing();
+            player.seekTo(targetTime, true);
+            if (pendingStateSync.playing) {
+              player.playVideo();
+            } else {
+              player.pauseVideo();
+            }
+            pendingStateSync = null;
+          }
+
+          // Sync volume slider to player's actual volume
           try {
             var vol = player.getVolume();
             document.getElementById("ctrlVolume").value = vol;
@@ -710,6 +792,17 @@ function initPlayer(videoId, startTime, autoplay) {
             publish("sync", { action: "play", time: player.getCurrentTime() });
           } else if (e.data === YT.PlayerState.PAUSED) {
             publish("sync", { action: "pause", time: player.getCurrentTime() });
+          } else if (e.data === YT.PlayerState.ENDED) {
+            // Broadcast a final pause so everyone lands at the same position
+            publish("sync", { action: "pause", time: player.getDuration() });
+            addSystemMessage("📺 Video ended");
+            // Hide the iframe so end-screen related-video links can't be clicked
+            document.getElementById("playerWrapper").style.display = "none";
+            document.getElementById("customControls").classList.remove("visible");
+            document.getElementById("placeholder").style.display = "";
+            playerReady = false;
+            // Keep player object alive so we can reuse it, but mark as ended
+            currentVideoId = null;
           }
         },
         onError: function(e) {
@@ -725,7 +818,7 @@ function initPlayer(videoId, startTime, autoplay) {
 
 function applySync(action, time) {
   if (!player || !playerReady) return;
-  isSyncing = true;
+  setSyncing();
   document.getElementById("syncBadge").classList.add("active");
   setTimeout(function() { document.getElementById("syncBadge").classList.remove("active"); }, 600);
 
@@ -738,9 +831,10 @@ function applySync(action, time) {
   } else if (action === "pause") {
     player.pauseVideo();
     if (drift > SYNC_THRESHOLD) player.seekTo(time, true);
+  } else if (action === "seek") {
+    player.seekTo(time, true);
+    log("Seek sync to:", time.toFixed(1));
   }
-
-  setTimeout(function() { isSyncing = false; }, 500);
 }
 
 function loadVideoById(videoId) {
@@ -854,22 +948,6 @@ function startSeekUpdater() {
   }, 500);
 }
 
-// Handle seek sync from others
-var origApplySync = applySync;
-applySync = function(action, time) {
-  if (action === "seek") {
-    if (!player || !playerReady) return;
-    isSyncing = true;
-    document.getElementById("syncBadge").classList.add("active");
-    setTimeout(function() { document.getElementById("syncBadge").classList.remove("active"); }, 600);
-    player.seekTo(time, true);
-    log("Seek sync to:", time.toFixed(1));
-    setTimeout(function() { isSyncing = false; }, 500);
-    return;
-  }
-  origApplySync(action, time);
-};
-
 // ========== CHAT ==========
 document.getElementById("btnSend").addEventListener("click", sendChat);
 document.getElementById("chatInput").addEventListener("keydown", function(e) {
@@ -906,7 +984,7 @@ function addSystemMessage(text) {
   container.scrollTop = container.scrollHeight;
 }
 
-log("WatchTogether loaded");
+log("CouchView loaded");
 </script>
 </body>
 </html>
