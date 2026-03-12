@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WatchTogether</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'DM Sans', system-ui, sans-serif;
+    background: linear-gradient(160deg, #0a0a0f 0%, #12101f 40%, #1a0e2e 100%);
+    color: #e8e4f0; min-height: 100vh; overflow: hidden;
+  }
+
+  #lobby {
+    min-height: 100vh; display: flex; align-items: center;
+    justify-content: center; padding: 20px;
+  }
+  .lobby-box { width: 100%; max-width: 460px; text-align: center; }
+  .logo-row { display: inline-flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .logo-icon {
+    width: 48px; height: 48px; border-radius: 14px;
+    background: linear-gradient(135deg, #ff4d6a, #c34cff);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px; box-shadow: 0 0 30px rgba(195,76,255,0.3);
+  }
+  .logo-text {
+    font-size: 28px; font-weight: 700; letter-spacing: -0.5px;
+    background: linear-gradient(90deg, #ff4d6a, #c34cff);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .lobby-sub { color: #8a819e; font-size: 15px; letter-spacing: 0.3px; margin-bottom: 36px; }
+
+  .input-field {
+    width: 100%; padding: 14px 18px; border-radius: 12px;
+    border: 1px solid #2d2744; background: rgba(255,255,255,0.04);
+    color: #e8e4f0; font-size: 16px; outline: none;
+    font-family: inherit; transition: border-color 0.2s;
+  }
+  .input-field:focus { border-color: #c34cff; }
+  .input-field::placeholder { color: #554e6a; }
+  .input-field.error { border-color: #ff4d6a; }
+
+  #nicknameInput { text-align: center; letter-spacing: 0.5px; margin-bottom: 28px; }
+
+  .btn-create {
+    width: 100%; padding: 16px; border-radius: 14px; border: none;
+    background: linear-gradient(135deg, #ff4d6a, #c34cff);
+    color: #fff; font-size: 16px; font-weight: 600; cursor: pointer;
+    letter-spacing: 0.3px; box-shadow: 0 4px 24px rgba(195,76,255,0.25);
+    transition: opacity 0.2s; font-family: inherit; margin-bottom: 20px;
+  }
+  .btn-create:hover { opacity: 0.9; }
+
+  .divider { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+  .divider-line { flex: 1; height: 1px; background: #2d2744; }
+  .divider-text { color: #554e6a; font-size: 13px; text-transform: uppercase; letter-spacing: 2px; }
+  .join-row { display: flex; gap: 10px; }
+  #joinCodeInput { flex: 1; text-align: center; letter-spacing: 4px; font-weight: 600; }
+  .btn-join {
+    padding: 14px 28px; border-radius: 12px; border: 1px solid #c34cff;
+    background: transparent; color: #c34cff; font-size: 15px;
+    font-weight: 600; cursor: pointer; transition: all 0.2s; font-family: inherit;
+  }
+  .btn-join:hover { background: rgba(195,76,255,0.1); }
+
+  .status-msg {
+    margin-top: 18px; font-size: 13px; color: #8a819e;
+    min-height: 20px; transition: color 0.2s;
+  }
+  .status-msg.error { color: #ff4d6a; }
+  .status-msg.ok { color: #4dff8f; }
+
+  #room { display: none; flex-direction: column; height: 100vh; }
+  .room-header {
+    padding: 12px 20px; border-bottom: 1px solid #1e1a2e;
+    display: flex; align-items: center; justify-content: space-between;
+    background: rgba(10,10,15,0.95); flex-shrink: 0; flex-wrap: wrap; gap: 8px;
+  }
+  .room-header-left { display: flex; align-items: center; gap: 10px; }
+  .room-logo-sm {
+    width: 32px; height: 32px; border-radius: 10px;
+    background: linear-gradient(135deg, #ff4d6a, #c34cff);
+    display: flex; align-items: center; justify-content: center; font-size: 16px;
+  }
+  .room-logo-text {
+    font-size: 16px; font-weight: 700;
+    background: linear-gradient(90deg, #ff4d6a, #c34cff);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .room-header-right { display: flex; align-items: center; gap: 16px; }
+
+  .conn-status { display: flex; align-items: center; gap: 6px; }
+  .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: #ff4d6a; }
+  .conn-dot.connected { background: #4dff8f; box-shadow: 0 0 8px rgba(77,255,143,0.4); }
+  .conn-label { font-size: 12px; color: #8a819e; }
+
+  .sync-badge {
+    font-size: 11px; color: #c34cff;
+    background: rgba(195,76,255,0.1); padding: 4px 10px;
+    border-radius: 20px; font-weight: 600; display: none;
+  }
+  .sync-badge.active { display: inline-block; }
+
+  .room-code {
+    background: rgba(195,76,255,0.1); border: 1px solid #2d2744;
+    padding: 6px 14px; border-radius: 8px; font-size: 14px;
+    font-weight: 700; letter-spacing: 2px; color: #c34cff; cursor: pointer;
+    user-select: all;
+  }
+  .room-code:hover { background: rgba(195,76,255,0.18); }
+
+  .room-body { flex: 1; display: flex; overflow: hidden; }
+  .video-col { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .url-bar { padding: 12px 20px; display: flex; gap: 10px; border-bottom: 1px solid #1e1a2e; }
+  #videoUrlInput { flex: 1; padding: 10px 16px; border-radius: 10px; font-size: 14px; }
+  .btn-load {
+    padding: 10px 22px; border-radius: 10px; border: none;
+    background: linear-gradient(135deg, #ff4d6a, #c34cff);
+    color: #fff; font-weight: 600; font-size: 14px; cursor: pointer; font-family: inherit;
+  }
+
+  .player-area {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    background: #000; position: relative;
+  }
+  .player-placeholder { text-align: center; color: #554e6a; }
+  .player-placeholder .emoji { font-size: 56px; margin-bottom: 16px; opacity: 0.4; }
+  .player-placeholder p { font-size: 16px; }
+  .player-placeholder .sub { font-size: 13px; margin-top: 8px; color: #3d3656; }
+
+  .chat-col {
+    width: 280px; border-left: 1px solid #1e1a2e;
+    display: flex; flex-direction: column;
+    background: rgba(10,10,15,0.6); flex-shrink: 0;
+  }
+  .chat-header {
+    padding: 14px 16px; border-bottom: 1px solid #1e1a2e;
+    font-size: 13px; font-weight: 600; color: #8a819e;
+    text-transform: uppercase; letter-spacing: 1.5px;
+  }
+  .chat-messages {
+    flex: 1; overflow-y: auto; padding: 12px 14px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .chat-empty { color: #3d3656; font-size: 13px; text-align: center; margin-top: 40px; }
+  .chat-msg { padding: 8px 12px; border-radius: 10px; background: rgba(255,255,255,0.03); }
+  .chat-msg.mine { background: rgba(195,76,255,0.1); border-top-right-radius: 2px; }
+  .chat-msg:not(.mine) { border-top-left-radius: 2px; }
+  .chat-nick { font-size: 11px; font-weight: 700; margin-bottom: 3px; }
+  .chat-nick.mine { color: #c34cff; }
+  .chat-nick:not(.mine) { color: #ff4d6a; }
+  .chat-text { font-size: 13px; line-height: 1.4; color: #ccc; word-break: break-word; }
+
+  .chat-input-row { padding: 12px 14px; border-top: 1px solid #1e1a2e; display: flex; gap: 8px; }
+  #chatInput { flex: 1; padding: 10px 14px; border-radius: 10px; font-size: 13px; }
+  .btn-send {
+    padding: 10px 14px; border-radius: 10px; border: none;
+    background: #2d2744; color: #c34cff; font-size: 16px; cursor: pointer;
+  }
+
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .pulsing { animation: pulse 1.5s ease-in-out infinite; }
+
+  @media (max-width: 700px) { .chat-col { display: none; } }
+</style>
+</head>
+<body>
+
+<div id="lobby">
+  <div class="lobby-box">
+    <div style="margin-bottom: 40px;">
+      <div class="logo-row">
+        <div class="logo-icon">▶</div>
+        <span class="logo-text">WatchTogether</span>
+      </div>
+      <p class="lobby-sub">Sync YouTube videos with friends — no installs, no sign-ups</p>
+    </div>
+    <input id="nicknameInput" class="input-field" type="text" placeholder="Your nickname" maxlength="16">
+    <button class="btn-create" id="btnCreate">Create a Room</button>
+    <div class="divider">
+      <div class="divider-line"></div>
+      <span class="divider-text">or join</span>
+      <div class="divider-line"></div>
+    </div>
+    <div class="join-row">
+      <input id="joinCodeInput" class="input-field" type="text" placeholder="Room code" maxlength="12">
+      <button class="btn-join" id="btnJoin">Join</button>
+    </div>
+    <div class="status-msg" id="statusMsg"></div>
+  </div>
+</div>
+
+<div id="room">
+  <div class="room-header">
+    <div class="room-header-left">
+      <div class="room-logo-sm">▶</div>
+      <span class="room-logo-text">WatchTogether</span>
+    </div>
+    <div class="room-header-right">
+      <span class="sync-badge" id="syncBadge">⟳ syncing</span>
+      <div class="conn-status">
+        <span class="conn-dot" id="connDot"></span>
+        <span class="conn-label pulsing" id="connLabel">connecting...</span>
+      </div>
+      <div class="room-code" id="roomCodeDisplay" title="Click to copy room code"></div>
+    </div>
+  </div>
+
+  <div class="room-body">
+    <div class="video-col">
+      <div class="url-bar">
+        <input id="videoUrlInput" class="input-field" type="text" placeholder="Paste a YouTube URL...">
+        <button class="btn-load" id="btnLoad">Load</button>
+      </div>
+      <div class="player-area">
+        <div class="player-placeholder" id="placeholder">
+          <div class="emoji">🎬</div>
+          <p>Paste a YouTube link above to start watching</p>
+          <p class="sub">Both you and your friend can load videos</p>
+        </div>
+        <div id="ytPlayerHost" style="width:100%;height:100%;position:absolute;top:0;left:0;"></div>
+      </div>
+    </div>
+
+    <div class="chat-col">
+      <div class="chat-header">Chat</div>
+      <div class="chat-messages" id="chatMessages">
+        <div class="chat-empty" id="chatEmpty">No messages yet...</div>
+      </div>
+      <div class="chat-input-row">
+        <input id="chatInput" class="input-field" type="text" placeholder="Say something...">
+        <button class="btn-send" id="btnSend">↑</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ========== STATE ==========
+var SYNC_THRESHOLD = 3;
+var nickname = "";
+var roomCode = "";
+var myId = "u" + Math.random().toString(36).slice(2, 10);
+var mqttClient = null;
+var currentVideoId = null;
+var player = null;
+var playerReady = false;
+var isSyncing = false;
+var presenceTimer = null;
+var knownPeers = {};
+
+// MQTT brokers to try in order
+var BROKERS = [
+  "wss://broker.hivemq.com:8884/mqtt",
+  "wss://broker.emqx.io:8084/mqtt"
+];
+
+function log() {
+  var args = Array.prototype.slice.call(arguments);
+  args.unshift("[WT]");
+  console.log.apply(console, args);
+}
+
+// ========== LOAD MQTT.JS ==========
+function loadMQTT() {
+  return new Promise(function(resolve, reject) {
+    if (window.mqtt) return resolve();
+    log("Loading MQTT.js...");
+    var s = document.createElement("script");
+    s.src = "https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js";
+    s.onload = function() {
+      log("MQTT.js loaded:", !!window.mqtt);
+      resolve();
+    };
+    s.onerror = function() {
+      reject(new Error("Failed to load MQTT.js"));
+    };
+    document.head.appendChild(s);
+  });
+}
+
+// ========== HELPERS ==========
+function extractVideoId(url) {
+  if (!url) return null;
+  var patterns = [
+    /youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})/,
+    /youtu\.be\/([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/,
+    /^([a-zA-Z0-9_-]{11})$/
+  ];
+  for (var i = 0; i < patterns.length; i++) {
+    var m = url.match(patterns[i]);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+function genCode() {
+  var chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  var s = "";
+  for (var i = 0; i < 5; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+
+function esc(s) {
+  var d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function setStatus(msg, type) {
+  var el = document.getElementById("statusMsg");
+  el.textContent = msg;
+  el.className = "status-msg" + (type ? " " + type : "");
+  log("Status:", msg);
+}
+
+function setConnected(connected, label) {
+  document.getElementById("connDot").className = "conn-dot" + (connected ? " connected" : "");
+  var lbl = document.getElementById("connLabel");
+  lbl.textContent = label || (connected ? "connected" : "connecting...");
+  lbl.classList.toggle("pulsing", !connected);
+}
+
+function flashError(inputId) {
+  var el = document.getElementById(inputId);
+  el.classList.add("error");
+  el.focus();
+  setTimeout(function() { el.classList.remove("error"); }, 2000);
+}
+
+// ========== MQTT MESSAGING ==========
+function topic(sub) {
+  return "watchtogether/" + roomCode + "/" + sub;
+}
+
+function publish(sub, data) {
+  if (!mqttClient || !mqttClient.connected) {
+    log("Cannot publish, not connected");
+    return;
+  }
+  data.from = myId;
+  data.ts = Date.now();
+  var payload = JSON.stringify(data);
+  mqttClient.publish(topic(sub), payload, { qos: 0 });
+}
+
+function connectToBroker(brokerIndex) {
+  if (brokerIndex >= BROKERS.length) {
+    setStatus("Could not connect to any message broker. Try refreshing.", "error");
+    return;
+  }
+
+  var url = BROKERS[brokerIndex];
+  log("Connecting to broker:", url);
+  setStatus("Connecting to server (" + (brokerIndex + 1) + "/" + BROKERS.length + ")...");
+
+  var clientId = "wt_" + myId + "_" + Math.random().toString(36).slice(2, 6);
+
+  mqttClient = mqtt.connect(url, {
+    clientId: clientId,
+    clean: true,
+    connectTimeout: 8000,
+    reconnectPeriod: 3000,
+    keepalive: 30
+  });
+
+  var connectTimeout = setTimeout(function() {
+    log("Broker timeout, trying next...");
+    mqttClient.end(true);
+    connectToBroker(brokerIndex + 1);
+  }, 10000);
+
+  mqttClient.on("connect", function() {
+    clearTimeout(connectTimeout);
+    log("Connected to broker:", url);
+    setConnected(true, "connected to room");
+
+    // Subscribe to all room topics
+    var topics = [topic("sync"), topic("video"), topic("chat"), topic("presence")];
+    mqttClient.subscribe(topics, { qos: 0 }, function(err) {
+      if (err) {
+        log("Subscribe error:", err);
+      } else {
+        log("Subscribed to:", topics.join(", "));
+      }
+    });
+
+    // Enter room view
+    if (document.getElementById("lobby").style.display !== "none") {
+      enterRoom();
+    }
+
+    // Announce presence
+    publishPresence();
+    presenceTimer = setInterval(publishPresence, 5000);
+  });
+
+  mqttClient.on("message", function(t, payload) {
+    try {
+      var data = JSON.parse(payload.toString());
+      // Ignore own messages
+      if (data.from === myId) return;
+      handleMessage(t, data);
+    } catch (e) {
+      log("Parse error:", e);
+    }
+  });
+
+  mqttClient.on("error", function(err) {
+    log("MQTT error:", err.message || err);
+  });
+
+  mqttClient.on("close", function() {
+    log("MQTT connection closed");
+    setConnected(false, "reconnecting...");
+  });
+
+  mqttClient.on("reconnect", function() {
+    log("MQTT reconnecting...");
+  });
+
+  mqttClient.on("offline", function() {
+    log("MQTT offline");
+    setConnected(false, "offline");
+  });
+}
+
+function handleMessage(t, data) {
+  var sub = t.replace("watchtogether/" + roomCode + "/", "");
+  log("Received:", sub, data);
+
+  switch (sub) {
+    case "sync":
+      applySync(data.action, data.time);
+      break;
+    case "video":
+      loadVideoById(data.videoId);
+      break;
+    case "chat":
+      addMessage(data.nick, data.text, false);
+      break;
+    case "presence":
+      handlePresence(data);
+      break;
+  }
+}
+
+function publishPresence() {
+  publish("presence", { nick: nickname, type: "ping" });
+}
+
+function handlePresence(data) {
+  knownPeers[data.from] = { nick: data.nick, ts: Date.now() };
+  updatePeerCount();
+}
+
+function updatePeerCount() {
+  var now = Date.now();
+  var active = 0;
+  var names = [];
+  for (var id in knownPeers) {
+    if (now - knownPeers[id].ts < 12000) {
+      active++;
+      names.push(knownPeers[id].nick);
+    } else {
+      delete knownPeers[id];
+    }
+  }
+  if (active > 0) {
+    setConnected(true, names.join(", ") + " in room");
+  } else {
+    setConnected(true, "waiting for friend...");
+  }
+}
+
+// ========== LOBBY ==========
+document.getElementById("btnCreate").addEventListener("click", function() {
+  log("Create clicked");
+  nickname = document.getElementById("nicknameInput").value.trim();
+  if (!nickname) {
+    setStatus("Please enter a nickname first", "error");
+    flashError("nicknameInput");
+    return;
+  }
+  roomCode = genCode();
+  log("Room code:", roomCode);
+  startConnection();
+});
+
+document.getElementById("btnJoin").addEventListener("click", function() {
+  log("Join clicked");
+  nickname = document.getElementById("nicknameInput").value.trim();
+  var code = document.getElementById("joinCodeInput").value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+  if (!nickname) {
+    setStatus("Please enter a nickname first", "error");
+    flashError("nicknameInput");
+    return;
+  }
+  if (!code) {
+    setStatus("Please enter a room code", "error");
+    flashError("joinCodeInput");
+    return;
+  }
+
+  roomCode = code;
+  log("Joining room:", roomCode, "as:", nickname);
+  startConnection();
+});
+
+function startConnection() {
+  setStatus("Loading...");
+  loadMQTT().then(function() {
+    connectToBroker(0);
+  }).catch(function(e) {
+    setStatus("Failed to load messaging library. Check your connection.", "error");
+    log("Load error:", e);
+  });
+}
+
+function enterRoom() {
+  document.getElementById("lobby").style.display = "none";
+  document.getElementById("room").style.display = "flex";
+  document.getElementById("roomCodeDisplay").textContent = roomCode;
+  log("Entered room:", roomCode);
+}
+
+document.getElementById("roomCodeDisplay").addEventListener("click", function() {
+  try { navigator.clipboard.writeText(roomCode); } catch(e) {}
+  this.textContent = "copied!";
+  var self = this;
+  setTimeout(function() { self.textContent = roomCode; }, 1200);
+});
+
+// ========== YOUTUBE ==========
+function loadYTAPI() {
+  return new Promise(function(resolve) {
+    if (window.YT && window.YT.Player) return resolve();
+    log("Loading YouTube API...");
+    var tag = document.createElement("script");
+    tag.src = "https://www.youtube.com/iframe_api";
+    document.body.appendChild(tag);
+    window.onYouTubeIframeAPIReady = function() {
+      log("YouTube API ready");
+      resolve();
+    };
+  });
+}
+
+function initPlayer(videoId) {
+  log("initPlayer:", videoId);
+  loadYTAPI().then(function() {
+    playerReady = false;
+    var host = document.getElementById("ytPlayerHost");
+    host.innerHTML = '<div id="ytplayer" style="width:100%;height:100%;"></div>';
+    document.getElementById("placeholder").style.display = "none";
+
+    var origin = window.location.protocol === "file:" ? "https://www.youtube.com" : window.location.origin;
+    player = new YT.Player("ytplayer", {
+      width: "100%",
+      height: "100%",
+      videoId: videoId,
+      playerVars: { autoplay: 0, controls: 1, modestbranding: 1, rel: 0, enablejsapi: 1, origin: origin },
+      events: {
+        onReady: function() {
+          playerReady = true;
+          log("Player ready");
+        },
+        onStateChange: function(e) {
+          if (isSyncing) return;
+          if (e.data === YT.PlayerState.PLAYING) {
+            publish("sync", { action: "play", time: player.getCurrentTime() });
+          } else if (e.data === YT.PlayerState.PAUSED) {
+            publish("sync", { action: "pause", time: player.getCurrentTime() });
+          }
+        },
+        onError: function(e) {
+          log("YouTube error code:", e.data);
+          if (e.data === 150 || e.data === 101) {
+            log("This video does not allow embedding. Try a different video.");
+          } else if (e.data === 2) {
+            log("Invalid video ID");
+          }
+          if (window.location.protocol === "file:") {
+            log("WARNING: You are opening this file directly (file://). YouTube embeds may not work. Serve over HTTP instead: python3 -m http.server 8000");
+          }
+        }
+      }
+    });
+  });
+}
+
+function applySync(action, time) {
+  if (!player || !playerReady) return;
+  isSyncing = true;
+  document.getElementById("syncBadge").classList.add("active");
+  setTimeout(function() { document.getElementById("syncBadge").classList.remove("active"); }, 600);
+
+  var drift = Math.abs(player.getCurrentTime() - time);
+  log("Sync:", action, "t:", time.toFixed(1), "drift:", drift.toFixed(1));
+
+  if (action === "play") {
+    if (drift > SYNC_THRESHOLD) player.seekTo(time, true);
+    player.playVideo();
+  } else if (action === "pause") {
+    player.pauseVideo();
+    if (drift > SYNC_THRESHOLD) player.seekTo(time, true);
+  }
+
+  setTimeout(function() { isSyncing = false; }, 500);
+}
+
+function loadVideoById(videoId) {
+  currentVideoId = videoId;
+  initPlayer(videoId);
+}
+
+document.getElementById("btnLoad").addEventListener("click", loadVideo);
+document.getElementById("videoUrlInput").addEventListener("keydown", function(e) {
+  if (e.key === "Enter") loadVideo();
+});
+
+function loadVideo() {
+  var videoId = extractVideoId(document.getElementById("videoUrlInput").value);
+  if (!videoId) {
+    log("Invalid YouTube URL");
+    return;
+  }
+  currentVideoId = videoId;
+  document.getElementById("videoUrlInput").value = "";
+  initPlayer(videoId);
+  publish("video", { videoId: videoId });
+}
+
+// ========== CHAT ==========
+document.getElementById("btnSend").addEventListener("click", sendChat);
+document.getElementById("chatInput").addEventListener("keydown", function(e) {
+  if (e.key === "Enter") sendChat();
+});
+
+function sendChat() {
+  var text = document.getElementById("chatInput").value.trim();
+  if (!text) return;
+  document.getElementById("chatInput").value = "";
+  addMessage(nickname, text, true);
+  publish("chat", { nick: nickname, text: text });
+}
+
+function addMessage(nick, text, mine) {
+  document.getElementById("chatEmpty").style.display = "none";
+  var div = document.createElement("div");
+  div.className = "chat-msg" + (mine ? " mine" : "");
+  div.innerHTML =
+    '<div class="chat-nick ' + (mine ? "mine" : "") + '">' + esc(nick) + '</div>' +
+    '<div class="chat-text">' + esc(text) + '</div>';
+  var container = document.getElementById("chatMessages");
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+log("WatchTogether loaded");
+</script>
+</body>
+</html>
