@@ -340,13 +340,15 @@ var currentVideoId = null;
 var player = null;
 var playerReady = false;
 var suppressUntil = 0;       // timestamp — suppress outbound state publishes until this moment
+var lastSyncTs = 0;          // ts of last applied inbound sync — used to drop stale/out-of-order messages
+var awaitingResume = false;  // true while late-joiner waits for its player to buffer before broadcasting resume
 var presenceTimer = null;
 var resyncTimer = null;      // periodic drift-correction heartbeat
 var seekUpdateTimer = null;
 var knownPeers = {};
 var isSeeking = false;
 var lastVolume = 100;
-var pendingStateSync = null; // { videoId, time, playing, receivedAt } for late-joiner drift correction
+var pendingStateSync = null; // { videoId, time, playing, shouldResume, receivedAt } for late-joiner sync
 
 var BROKERS = [
   "wss://broker.hivemq.com:8884/mqtt",
@@ -462,6 +464,8 @@ function leaveRoom() {
   pendingStateSync = null;
   knownPeers = {};
   suppressUntil = 0;
+  lastSyncTs = 0;
+  awaitingResume = false;
   roomCode = "";
 
   // Reset player UI
@@ -575,10 +579,17 @@ function handleMessage(t, data) {
 
   switch (sub) {
     case "sync":
+      // Drop out-of-order / stale messages (QoS 0 gives no ordering guarantee)
+      if (data.ts && data.ts < lastSyncTs) {
+        log("Dropping stale sync:", data.action, "(ts", data.ts, "< last", lastSyncTs + ")");
+        break;
+      }
+      if (data.ts) lastSyncTs = data.ts;
       applySync(data.action, data.time);
       break;
     case "video":
       if (data.videoId && data.videoId !== currentVideoId) {
+        lastSyncTs = 0; // new video — reset stale filter
         loadVideoById(data.videoId);
       }
       break;
@@ -603,12 +614,28 @@ function handleMessage(t, data) {
       }
       break;
     case "state-response":
-      // Late joiner receives current video state — stamp arrival time for drift correction
+      // Late joiner receives current state.
+      // If video was playing: pause everyone, load, then broadcast resume when buffered.
       if (!currentVideoId && data.videoId) {
         log("Got state from", data.nick, "- video:", data.videoId, "time:", data.time, "playing:", data.playing);
-        pendingStateSync = { videoId: data.videoId, time: data.time, playing: data.playing, receivedAt: Date.now() };
+        var shouldResume = !!data.playing;
+        pendingStateSync = {
+          videoId: data.videoId,
+          time: data.time,
+          playing: shouldResume,
+          shouldResume: shouldResume,
+          receivedAt: Date.now()
+        };
         currentVideoId = data.videoId;
-        initPlayer(data.videoId, data.time, data.playing);
+
+        if (shouldResume) {
+          // Pause everyone so they wait while we buffer
+          publish("sync", { action: "pause", time: data.time });
+          addSystemMessage("⏸ Syncing " + nickname + " — resuming shortly...");
+        }
+
+        // Always load without autoplay — onReady handles the actual play
+        initPlayer(data.videoId, data.time, false);
       }
       break;
   }
@@ -767,24 +794,26 @@ function initPlayer(videoId, startTime, autoplay) {
           startSeekUpdater();
           startResyncHeartbeat();
 
-          // Late-joiner drift correction: the time in state-response is stale
-          // by however long the player took to load — compensate here.
-          // suppress(5000) covers: seek + buffer + PLAYING firing after buffer.
           if (pendingStateSync) {
+            // Drift-correct: compensate for time the player took to load
             var elapsed = (Date.now() - pendingStateSync.receivedAt) / 1000;
             var targetTime = pendingStateSync.time + (pendingStateSync.playing ? elapsed : 0);
-            log("Late-join seek to:", targetTime.toFixed(1), "(elapsed:", elapsed.toFixed(1), "s)");
-            suppress(5000);
-            player.seekTo(targetTime, true);
-            if (pendingStateSync.playing) {
-              player.playVideo();
+            log("Late-join target:", targetTime.toFixed(1), "(elapsed:", elapsed.toFixed(1), "s)");
+
+            suppress(8000); // block outbound during entire seek→buffer→PLAYING chain
+
+            if (pendingStateSync.shouldResume) {
+              // Set flag so onStateChange broadcasts resume once actually buffered
+              awaitingResume = true;
+              player.seekTo(targetTime, true);
+              player.playVideo(); // starts buffering; PLAYING fires when buffer is ready
             } else {
+              player.seekTo(targetTime, true);
               player.pauseVideo();
             }
             pendingStateSync = null;
           }
 
-          // Sync volume slider to player's actual volume
           try {
             var vol = player.getVolume();
             document.getElementById("ctrlVolume").value = vol;
@@ -793,17 +822,27 @@ function initPlayer(videoId, startTime, autoplay) {
         },
         onStateChange: function(e) {
           updatePlayPauseBtn();
-          // suppressed() uses a timestamp so it never gets permanently stuck
+
+          // Late-join resume: PLAYING fired because our buffer is ready — tell everyone to resume
+          if (awaitingResume && e.data === YT.PlayerState.PLAYING) {
+            awaitingResume = false;
+            var resumeAt = player.getCurrentTime();
+            log("Late-join buffered — broadcasting resume at", resumeAt.toFixed(1));
+            addSystemMessage("▶ All synced — resuming");
+            publish("sync", { action: "play", time: resumeAt });
+            return; // intentional outbound publish — bypass suppressed() check
+          }
+
+          // Block outbound echoes of syncs we applied from others
           if (suppressed()) return;
+
           if (e.data === YT.PlayerState.PLAYING) {
             publish("sync", { action: "play", time: player.getCurrentTime() });
           } else if (e.data === YT.PlayerState.PAUSED) {
             publish("sync", { action: "pause", time: player.getCurrentTime() });
           } else if (e.data === YT.PlayerState.ENDED) {
-            // Broadcast a final pause so everyone lands at the same position
             publish("sync", { action: "pause", time: player.getDuration() });
             addSystemMessage("📺 Video ended");
-            // Hide the iframe so end-screen related-video links can't be clicked
             document.getElementById("playerWrapper").style.display = "none";
             document.getElementById("customControls").classList.remove("visible");
             document.getElementById("placeholder").style.display = "";
@@ -862,6 +901,8 @@ function loadVideo() {
   var videoId = extractVideoId(document.getElementById("videoUrlInput").value);
   if (!videoId) { log("Invalid YouTube URL"); return; }
   currentVideoId = videoId;
+  lastSyncTs = 0;      // new video — stale filter reset
+  awaitingResume = false;
   document.getElementById("videoUrlInput").value = "";
   initPlayer(videoId, 0, false);
   // Publish with retain so late joiners also get it
