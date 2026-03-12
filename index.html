@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>WatchTogether</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
@@ -13,6 +13,7 @@
     color: #e8e4f0; min-height: 100vh; overflow: hidden;
   }
 
+  /* ===== LOBBY ===== */
   #lobby {
     min-height: 100vh; display: flex; align-items: center;
     justify-content: center; padding: 20px;
@@ -41,7 +42,6 @@
   .input-field:focus { border-color: #c34cff; }
   .input-field::placeholder { color: #554e6a; }
   .input-field.error { border-color: #ff4d6a; }
-
   #nicknameInput { text-align: center; letter-spacing: 0.5px; margin-bottom: 28px; }
 
   .btn-create {
@@ -72,6 +72,7 @@
   .status-msg.error { color: #ff4d6a; }
   .status-msg.ok { color: #4dff8f; }
 
+  /* ===== ROOM ===== */
   #room { display: none; flex-direction: column; height: 100vh; }
   .room-header {
     padding: 12px 20px; border-bottom: 1px solid #1e1a2e;
@@ -123,13 +124,69 @@
 
   .player-area {
     flex: 1; display: flex; align-items: center; justify-content: center;
-    background: #000; position: relative;
+    background: #000; position: relative; flex-direction: column;
   }
   .player-placeholder { text-align: center; color: #554e6a; }
   .player-placeholder .emoji { font-size: 56px; margin-bottom: 16px; opacity: 0.4; }
   .player-placeholder p { font-size: 16px; }
   .player-placeholder .sub { font-size: 13px; margin-top: 8px; color: #3d3656; }
 
+  .player-wrapper {
+    flex: 1; width: 100%; position: relative; display: none;
+  }
+
+  /* ===== CUSTOM CONTROLS ===== */
+  .custom-controls {
+    display: none;
+    width: 100%; padding: 8px 16px;
+    background: rgba(10, 10, 15, 0.9);
+    border-top: 1px solid #1e1a2e;
+    flex-shrink: 0;
+    gap: 12px; align-items: center;
+  }
+  .custom-controls.visible { display: flex; }
+
+  .ctrl-btn {
+    background: none; border: none; color: #e8e4f0;
+    font-size: 18px; cursor: pointer; padding: 6px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 6px; transition: background 0.15s; flex-shrink: 0;
+    width: 36px; height: 36px;
+  }
+  .ctrl-btn:hover { background: rgba(255,255,255,0.08); }
+  .ctrl-btn:active { background: rgba(255,255,255,0.15); }
+
+  .seek-bar-container {
+    flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0;
+  }
+  .time-label {
+    font-size: 11px; color: #8a819e; font-variant-numeric: tabular-nums;
+    flex-shrink: 0; min-width: 36px;
+  }
+
+  .seek-bar, .volume-slider {
+    -webkit-appearance: none; appearance: none;
+    height: 4px; border-radius: 2px; outline: none; cursor: pointer;
+    background: #2d2744;
+  }
+  .seek-bar { flex: 1; min-width: 0; }
+  .volume-slider { width: 80px; flex-shrink: 0; }
+
+  .seek-bar::-webkit-slider-thumb, .volume-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #c34cff; cursor: pointer; border: none;
+  }
+  .seek-bar::-moz-range-thumb, .volume-slider::-moz-range-thumb {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #c34cff; cursor: pointer; border: none;
+  }
+
+  .volume-group {
+    display: flex; align-items: center; gap: 4px; flex-shrink: 0;
+  }
+
+  /* ===== CHAT ===== */
   .chat-col {
     width: 280px; border-left: 1px solid #1e1a2e;
     display: flex; flex-direction: column;
@@ -153,6 +210,12 @@
   .chat-nick:not(.mine) { color: #ff4d6a; }
   .chat-text { font-size: 13px; line-height: 1.4; color: #ccc; word-break: break-word; }
 
+  /* System messages (join/leave) */
+  .chat-system {
+    text-align: center; font-size: 11px; color: #554e6a;
+    padding: 4px 0; font-style: italic;
+  }
+
   .chat-input-row { padding: 12px 14px; border-top: 1px solid #1e1a2e; display: flex; gap: 8px; }
   #chatInput { flex: 1; padding: 10px 14px; border-radius: 10px; font-size: 13px; }
   .btn-send {
@@ -163,7 +226,10 @@
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
   .pulsing { animation: pulse 1.5s ease-in-out infinite; }
 
-  @media (max-width: 700px) { .chat-col { display: none; } }
+  @media (max-width: 700px) {
+    .chat-col { display: none; }
+    .volume-group { display: none; }
+  }
 </style>
 </head>
 <body>
@@ -220,7 +286,22 @@
           <p>Paste a YouTube link above to start watching</p>
           <p class="sub">Both you and your friend can load videos</p>
         </div>
-        <div id="ytPlayerHost" style="width:100%;height:100%;position:absolute;top:0;left:0;"></div>
+        <div class="player-wrapper" id="playerWrapper">
+          <div id="ytPlayerHost" style="width:100%;height:100%;position:absolute;top:0;left:0;"></div>
+        </div>
+      </div>
+      <!-- Custom controls bar -->
+      <div class="custom-controls" id="customControls">
+        <button class="ctrl-btn" id="ctrlPlayPause" title="Play/Pause">⏵</button>
+        <div class="seek-bar-container">
+          <span class="time-label" id="ctrlTimeCurrent">0:00</span>
+          <input type="range" class="seek-bar" id="ctrlSeek" min="0" max="100" value="0" step="0.5">
+          <span class="time-label" id="ctrlTimeDuration">0:00</span>
+        </div>
+        <div class="volume-group">
+          <button class="ctrl-btn" id="ctrlMute" title="Mute/Unmute">🔊</button>
+          <input type="range" class="volume-slider" id="ctrlVolume" min="0" max="100" value="100" step="1">
+        </div>
       </div>
     </div>
 
@@ -240,6 +321,8 @@
 <script>
 // ========== STATE ==========
 var SYNC_THRESHOLD = 3;
+var PRESENCE_INTERVAL = 5000;
+var PRESENCE_TIMEOUT = 14000;
 var nickname = "";
 var roomCode = "";
 var myId = "u" + Math.random().toString(36).slice(2, 10);
@@ -249,9 +332,11 @@ var player = null;
 var playerReady = false;
 var isSyncing = false;
 var presenceTimer = null;
+var seekUpdateTimer = null;
 var knownPeers = {};
+var isSeeking = false;
+var lastVolume = 100;
 
-// MQTT brokers to try in order
 var BROKERS = [
   "wss://broker.hivemq.com:8884/mqtt",
   "wss://broker.emqx.io:8084/mqtt"
@@ -270,13 +355,8 @@ function loadMQTT() {
     log("Loading MQTT.js...");
     var s = document.createElement("script");
     s.src = "https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js";
-    s.onload = function() {
-      log("MQTT.js loaded:", !!window.mqtt);
-      resolve();
-    };
-    s.onerror = function() {
-      reject(new Error("Failed to load MQTT.js"));
-    };
+    s.onload = function() { log("MQTT.js loaded"); resolve(); };
+    s.onerror = function() { reject(new Error("Failed to load MQTT.js")); };
     document.head.appendChild(s);
   });
 }
@@ -310,6 +390,14 @@ function esc(s) {
   return d.innerHTML;
 }
 
+function fmtTime(sec) {
+  if (!sec || isNaN(sec)) return "0:00";
+  sec = Math.floor(sec);
+  var m = Math.floor(sec / 60);
+  var s = sec % 60;
+  return m + ":" + (s < 10 ? "0" : "") + s;
+}
+
 function setStatus(msg, type) {
   var el = document.getElementById("statusMsg");
   el.textContent = msg;
@@ -331,20 +419,16 @@ function flashError(inputId) {
   setTimeout(function() { el.classList.remove("error"); }, 2000);
 }
 
-// ========== MQTT MESSAGING ==========
-function topic(sub) {
+// ========== MQTT ==========
+function topicPath(sub) {
   return "watchtogether/" + roomCode + "/" + sub;
 }
 
-function publish(sub, data) {
-  if (!mqttClient || !mqttClient.connected) {
-    log("Cannot publish, not connected");
-    return;
-  }
+function publish(sub, data, retain) {
+  if (!mqttClient || !mqttClient.connected) return;
   data.from = myId;
   data.ts = Date.now();
-  var payload = JSON.stringify(data);
-  mqttClient.publish(topic(sub), payload, { qos: 0 });
+  mqttClient.publish(topicPath(sub), JSON.stringify(data), { qos: 0, retain: !!retain });
 }
 
 function connectToBroker(brokerIndex) {
@@ -378,66 +462,61 @@ function connectToBroker(brokerIndex) {
     log("Connected to broker:", url);
     setConnected(true, "connected to room");
 
-    // Subscribe to all room topics
-    var topics = [topic("sync"), topic("video"), topic("chat"), topic("presence")];
+    var topics = [
+      topicPath("sync"),
+      topicPath("video"),
+      topicPath("chat"),
+      topicPath("presence"),
+      topicPath("state-request"),
+      topicPath("state-response")
+    ];
     mqttClient.subscribe(topics, { qos: 0 }, function(err) {
-      if (err) {
-        log("Subscribe error:", err);
-      } else {
-        log("Subscribed to:", topics.join(", "));
-      }
+      if (!err) log("Subscribed to room topics");
     });
 
-    // Enter room view
     if (document.getElementById("lobby").style.display !== "none") {
       enterRoom();
     }
 
-    // Announce presence
+    // Announce join
+    publish("presence", { nick: nickname, event: "join" });
     publishPresence();
-    presenceTimer = setInterval(publishPresence, 5000);
+    presenceTimer = setInterval(publishPresence, PRESENCE_INTERVAL);
+
+    // Request current state from others (for late joiners)
+    setTimeout(function() {
+      if (!currentVideoId) {
+        log("Requesting room state (late joiner)...");
+        publish("state-request", { nick: nickname });
+      }
+    }, 800);
   });
 
   mqttClient.on("message", function(t, payload) {
     try {
       var data = JSON.parse(payload.toString());
-      // Ignore own messages
       if (data.from === myId) return;
       handleMessage(t, data);
-    } catch (e) {
-      log("Parse error:", e);
-    }
+    } catch (e) { log("Parse error:", e); }
   });
 
-  mqttClient.on("error", function(err) {
-    log("MQTT error:", err.message || err);
-  });
-
-  mqttClient.on("close", function() {
-    log("MQTT connection closed");
-    setConnected(false, "reconnecting...");
-  });
-
-  mqttClient.on("reconnect", function() {
-    log("MQTT reconnecting...");
-  });
-
-  mqttClient.on("offline", function() {
-    log("MQTT offline");
-    setConnected(false, "offline");
-  });
+  mqttClient.on("error", function(err) { log("MQTT error:", err.message || err); });
+  mqttClient.on("close", function() { setConnected(false, "reconnecting..."); });
+  mqttClient.on("reconnect", function() { log("MQTT reconnecting..."); });
+  mqttClient.on("offline", function() { setConnected(false, "offline"); });
 }
 
 function handleMessage(t, data) {
   var sub = t.replace("watchtogether/" + roomCode + "/", "");
-  log("Received:", sub, data);
 
   switch (sub) {
     case "sync":
       applySync(data.action, data.time);
       break;
     case "video":
-      loadVideoById(data.videoId);
+      if (data.videoId && data.videoId !== currentVideoId) {
+        loadVideoById(data.videoId);
+      }
       break;
     case "chat":
       addMessage(data.nick, data.text, false);
@@ -445,40 +524,76 @@ function handleMessage(t, data) {
     case "presence":
       handlePresence(data);
       break;
+    case "state-request":
+      // Someone is asking for current state — respond if we have a video
+      if (currentVideoId && player && playerReady) {
+        var st = 0;
+        try { st = player.getPlayerState(); } catch(e) {}
+        publish("state-response", {
+          videoId: currentVideoId,
+          time: player.getCurrentTime(),
+          playing: st === YT.PlayerState.PLAYING,
+          nick: nickname
+        });
+        log("Sent state response to", data.nick);
+      }
+      break;
+    case "state-response":
+      // Late joiner receives current video state
+      if (!currentVideoId && data.videoId) {
+        log("Got state from", data.nick, "- video:", data.videoId, "time:", data.time);
+        currentVideoId = data.videoId;
+        initPlayer(data.videoId, data.time, data.playing);
+      }
+      break;
   }
 }
 
+// ========== PRESENCE ==========
 function publishPresence() {
-  publish("presence", { nick: nickname, type: "ping" });
+  publish("presence", { nick: nickname, event: "ping" });
 }
 
 function handlePresence(data) {
+  var isNew = !knownPeers[data.from];
   knownPeers[data.from] = { nick: data.nick, ts: Date.now() };
-  updatePeerCount();
+
+  // Show join message in chat
+  if (isNew || data.event === "join") {
+    addSystemMessage(data.nick + " joined the room");
+  }
+
+  updatePeerDisplay();
 }
 
-function updatePeerCount() {
+function checkStalePresence() {
   var now = Date.now();
-  var active = 0;
-  var names = [];
   for (var id in knownPeers) {
-    if (now - knownPeers[id].ts < 12000) {
-      active++;
-      names.push(knownPeers[id].nick);
-    } else {
+    if (now - knownPeers[id].ts > PRESENCE_TIMEOUT) {
+      addSystemMessage(knownPeers[id].nick + " left the room");
       delete knownPeers[id];
     }
   }
-  if (active > 0) {
+  updatePeerDisplay();
+}
+
+function updatePeerDisplay() {
+  var names = [];
+  for (var id in knownPeers) {
+    names.push(knownPeers[id].nick);
+  }
+  if (names.length > 0) {
     setConnected(true, names.join(", ") + " in room");
   } else {
     setConnected(true, "waiting for friend...");
   }
 }
 
+// Check for stale peers every 6 seconds
+setInterval(checkStalePresence, 6000);
+
 // ========== LOBBY ==========
 document.getElementById("btnCreate").addEventListener("click", function() {
-  log("Create clicked");
   nickname = document.getElementById("nicknameInput").value.trim();
   if (!nickname) {
     setStatus("Please enter a nickname first", "error");
@@ -486,12 +601,11 @@ document.getElementById("btnCreate").addEventListener("click", function() {
     return;
   }
   roomCode = genCode();
-  log("Room code:", roomCode);
+  log("Creating room:", roomCode);
   startConnection();
 });
 
 document.getElementById("btnJoin").addEventListener("click", function() {
-  log("Join clicked");
   nickname = document.getElementById("nicknameInput").value.trim();
   var code = document.getElementById("joinCodeInput").value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 
@@ -516,8 +630,7 @@ function startConnection() {
   loadMQTT().then(function() {
     connectToBroker(0);
   }).catch(function(e) {
-    setStatus("Failed to load messaging library. Check your connection.", "error");
-    log("Load error:", e);
+    setStatus("Failed to load messaging library.", "error");
   });
 }
 
@@ -525,6 +638,7 @@ function enterRoom() {
   document.getElementById("lobby").style.display = "none";
   document.getElementById("room").style.display = "flex";
   document.getElementById("roomCodeDisplay").textContent = roomCode;
+  addSystemMessage("You joined the room as " + nickname);
   log("Entered room:", roomCode);
 }
 
@@ -550,26 +664,47 @@ function loadYTAPI() {
   });
 }
 
-function initPlayer(videoId) {
-  log("initPlayer:", videoId);
+function initPlayer(videoId, startTime, autoplay) {
+  log("initPlayer:", videoId, "startAt:", startTime, "autoplay:", autoplay);
   loadYTAPI().then(function() {
     playerReady = false;
     var host = document.getElementById("ytPlayerHost");
     host.innerHTML = '<div id="ytplayer" style="width:100%;height:100%;"></div>';
     document.getElementById("placeholder").style.display = "none";
+    document.getElementById("playerWrapper").style.display = "block";
+    document.getElementById("customControls").classList.add("visible");
 
+    var startSec = Math.floor(startTime || 0);
     var origin = window.location.protocol === "file:" ? "https://www.youtube.com" : window.location.origin;
+
     player = new YT.Player("ytplayer", {
       width: "100%",
       height: "100%",
       videoId: videoId,
-      playerVars: { autoplay: 0, controls: 1, modestbranding: 1, rel: 0, enablejsapi: 1, origin: origin },
+      playerVars: {
+        autoplay: autoplay ? 1 : 0,
+        controls: 1,
+        playsinline: 1,
+        modestbranding: 1,
+        rel: 0,
+        enablejsapi: 1,
+        origin: origin,
+        start: startSec
+      },
       events: {
         onReady: function() {
           playerReady = true;
           log("Player ready");
+          startSeekUpdater();
+          // Set volume slider to match player
+          try {
+            var vol = player.getVolume();
+            document.getElementById("ctrlVolume").value = vol;
+            lastVolume = vol;
+          } catch(e) {}
         },
         onStateChange: function(e) {
+          updatePlayPauseBtn();
           if (isSyncing) return;
           if (e.data === YT.PlayerState.PLAYING) {
             publish("sync", { action: "play", time: player.getCurrentTime() });
@@ -578,14 +713,9 @@ function initPlayer(videoId) {
           }
         },
         onError: function(e) {
-          log("YouTube error code:", e.data);
+          log("YouTube error:", e.data);
           if (e.data === 150 || e.data === 101) {
-            log("This video does not allow embedding. Try a different video.");
-          } else if (e.data === 2) {
-            log("Invalid video ID");
-          }
-          if (window.location.protocol === "file:") {
-            log("WARNING: You are opening this file directly (file://). YouTube embeds may not work. Serve over HTTP instead: python3 -m http.server 8000");
+            addSystemMessage("This video cannot be embedded. Try a different video.");
           }
         }
       }
@@ -615,7 +745,7 @@ function applySync(action, time) {
 
 function loadVideoById(videoId) {
   currentVideoId = videoId;
-  initPlayer(videoId);
+  initPlayer(videoId, 0, false);
 }
 
 document.getElementById("btnLoad").addEventListener("click", loadVideo);
@@ -625,15 +755,120 @@ document.getElementById("videoUrlInput").addEventListener("keydown", function(e)
 
 function loadVideo() {
   var videoId = extractVideoId(document.getElementById("videoUrlInput").value);
-  if (!videoId) {
-    log("Invalid YouTube URL");
-    return;
-  }
+  if (!videoId) { log("Invalid YouTube URL"); return; }
   currentVideoId = videoId;
   document.getElementById("videoUrlInput").value = "";
-  initPlayer(videoId);
-  publish("video", { videoId: videoId });
+  initPlayer(videoId, 0, false);
+  // Publish with retain so late joiners also get it
+  publish("video", { videoId: videoId }, true);
 }
+
+// ========== CUSTOM CONTROLS ==========
+function updatePlayPauseBtn() {
+  if (!player || !playerReady) return;
+  try {
+    var st = player.getPlayerState();
+    document.getElementById("ctrlPlayPause").textContent = (st === YT.PlayerState.PLAYING) ? "⏸" : "⏵";
+  } catch(e) {}
+}
+
+// Play/Pause
+document.getElementById("ctrlPlayPause").addEventListener("click", function() {
+  if (!player || !playerReady) return;
+  try {
+    var st = player.getPlayerState();
+    if (st === YT.PlayerState.PLAYING) {
+      player.pauseVideo();
+    } else {
+      player.playVideo();
+    }
+  } catch(e) { log("Play/pause error:", e); }
+});
+
+// Seek bar
+var seekBar = document.getElementById("ctrlSeek");
+seekBar.addEventListener("input", function() {
+  isSeeking = true;
+  if (!player || !playerReady) return;
+  try {
+    var duration = player.getDuration();
+    var t = (parseFloat(this.value) / 100) * duration;
+    document.getElementById("ctrlTimeCurrent").textContent = fmtTime(t);
+  } catch(e) {}
+});
+
+seekBar.addEventListener("change", function() {
+  if (!player || !playerReady) return;
+  try {
+    var duration = player.getDuration();
+    var t = (parseFloat(this.value) / 100) * duration;
+    player.seekTo(t, true);
+    publish("sync", { action: "seek", time: t });
+  } catch(e) {}
+  isSeeking = false;
+});
+
+// Volume
+document.getElementById("ctrlVolume").addEventListener("input", function() {
+  if (!player || !playerReady) return;
+  try {
+    var vol = parseInt(this.value);
+    player.setVolume(vol);
+    lastVolume = vol;
+    document.getElementById("ctrlMute").textContent = vol === 0 ? "🔇" : vol < 50 ? "🔉" : "🔊";
+    if (vol > 0) player.unMute();
+  } catch(e) {}
+});
+
+// Mute toggle
+document.getElementById("ctrlMute").addEventListener("click", function() {
+  if (!player || !playerReady) return;
+  try {
+    if (player.isMuted()) {
+      player.unMute();
+      player.setVolume(lastVolume || 100);
+      document.getElementById("ctrlVolume").value = lastVolume || 100;
+      this.textContent = "🔊";
+    } else {
+      player.mute();
+      document.getElementById("ctrlVolume").value = 0;
+      this.textContent = "🔇";
+    }
+  } catch(e) {}
+});
+
+// Update seek bar periodically
+function startSeekUpdater() {
+  if (seekUpdateTimer) clearInterval(seekUpdateTimer);
+  seekUpdateTimer = setInterval(function() {
+    if (!player || !playerReady || isSeeking) return;
+    try {
+      var cur = player.getCurrentTime();
+      var dur = player.getDuration();
+      if (dur > 0) {
+        seekBar.value = (cur / dur) * 100;
+        document.getElementById("ctrlTimeCurrent").textContent = fmtTime(cur);
+        document.getElementById("ctrlTimeDuration").textContent = fmtTime(dur);
+      }
+    } catch(e) {}
+  }, 500);
+}
+
+// Handle seek sync from others
+var origApplySync = applySync;
+applySync = function(action, time) {
+  if (action === "seek") {
+    if (!player || !playerReady) return;
+    isSyncing = true;
+    document.getElementById("syncBadge").classList.add("active");
+    setTimeout(function() { document.getElementById("syncBadge").classList.remove("active"); }, 600);
+    player.seekTo(time, true);
+    log("Seek sync to:", time.toFixed(1));
+    setTimeout(function() { isSyncing = false; }, 500);
+    return;
+  }
+  origApplySync(action, time);
+};
 
 // ========== CHAT ==========
 document.getElementById("btnSend").addEventListener("click", sendChat);
@@ -656,6 +891,16 @@ function addMessage(nick, text, mine) {
   div.innerHTML =
     '<div class="chat-nick ' + (mine ? "mine" : "") + '">' + esc(nick) + '</div>' +
     '<div class="chat-text">' + esc(text) + '</div>';
+  var container = document.getElementById("chatMessages");
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+function addSystemMessage(text) {
+  document.getElementById("chatEmpty").style.display = "none";
+  var div = document.createElement("div");
+  div.className = "chat-system";
+  div.textContent = text;
   var container = document.getElementById("chatMessages");
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
